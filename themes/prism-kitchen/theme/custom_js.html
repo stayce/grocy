@@ -1,0 +1,342 @@
+<!-- Prism kitchen: progressive enhancements for Grocy, no inventory writes. -->
+<script>
+(() => {
+  'use strict';
+  if (!window.Grocy || document.body.classList.contains('prism-theme')) return;
+
+  const body = document.body;
+  const view = String(Grocy.View || '').replace(/[^a-z0-9_-]/gi, '-');
+  body.classList.add('prism-theme', 'prism-view-' + view);
+  const embedded = body.classList.contains('embedded');
+  const authenticated = Number(Grocy.UserId) > 0;
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const make = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  };
+  const editable = target => target instanceof Element && !!target.closest(
+    'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .note-editor'
+  );
+  const base = new URL(Grocy.BaseUrl || '/', location.href);
+  if (!base.pathname.endsWith('/')) base.pathname += '/';
+  const route = path => new URL(path.replace(/^\//, ''), base).href;
+  const nav = $('#mainNav');
+  const navLinks = nav ? $$('a[href]', nav).filter(link => {
+    if (link.closest('.not-allowed, .disabled, [aria-disabled="true"]')) return false;
+    // Empty fragments are dropdown toggles too; URL.hash normalises "#" away.
+    if ((link.getAttribute('href') || '').includes('#')) return false;
+    const url = new URL(link.href, location.href);
+    return url.origin === location.origin && !url.searchParams.has('embedded') && !/\/(logout|login)\/?$/.test(url.pathname);
+  }) : [];
+  const routeLink = path => navLinks.find(link => link.href.split('?')[0] === route(path));
+
+  if (nav && !embedded) {
+    const brand = $('.navbar-brand', nav);
+    if (brand) {
+      brand.replaceChildren(make('span', 'prism-wordmark', 'Grocy'), make('span', 'prism-brand-note', 'a little kitchen magic'));
+      brand.setAttribute('aria-label', 'Grocy home');
+    }
+    $$('.nav-item-sidebar.active-page > a', nav).forEach(link => link.setAttribute('aria-current', 'page'));
+    $$('a[data-toggle="dropdown"]', nav).forEach(link => {
+      const label = link.textContent.trim();
+      if (label) link.setAttribute('aria-label', label);
+    });
+    $$('button[data-target="#related-links"]').forEach(button => button.setAttribute('aria-label', 'Page actions'));
+    // Reuse Grocy's Bootstrap tooltip instances; an ancestor with backdrop-filter
+    // must not become the positioning/stacking container for the floating tip.
+    $$('.navbar-sidenav [data-toggle="tooltip"]', nav).forEach(item => {
+      item.setAttribute('data-container', 'body');
+      const tooltip = window.jQuery && window.jQuery(item).data('bs.tooltip');
+      if (tooltip && tooltip.config && !tooltip._popper) tooltip.config.container = 'body';
+    });
+    const toggle = $('.navbar-toggler', nav);
+    const sidebar = $('#sidebarResponsive');
+    if (toggle && sidebar) {
+      toggle.setAttribute('aria-label', 'Toggle navigation');
+      toggle.setAttribute('aria-controls', sidebar.id);
+      const syncExpanded = () => toggle.setAttribute('aria-expanded', String(sidebar.classList.contains('show')));
+      syncExpanded();
+      new MutationObserver(syncExpanded).observe(sidebar, { attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
+  const hints = {
+    stockoverview: ['Your kitchen, in colour', 'Find what you have. Make something lovely.'],
+    shoppinglist: ['A very good list', 'Everything you need for your next delicious idea.'],
+    recipes: ['Your delicious collection', 'Keep your favourites close, and dinner a little easier.'],
+    mealplan: ['Something good ahead', 'A little planning leaves more room for enjoying.'],
+    purchase: ['Welcome to the pantry', 'Choose a product, then record what you brought home.'],
+    consume: ['Put good food to use', 'Record what you use to keep your pantry up to date.'],
+    products: ['Meet your ingredients', 'Create your products here, then add quantities in Purchase.'],
+    productform: ['Make room for something good', 'A name and a few useful details keep everything organised.'],
+    stockentries: ['The little details', 'See individual batches, dates and locations at a glance.'],
+    stockjournal: ['Your kitchen story', 'A record of what came in, what went out and what changed.'],
+    calendar: ['Days with a little flavour', 'Your household plans, all in one place.'],
+    choresoverview: ['Small rituals, happy home', 'Make everyday care feel a little lighter.'],
+    tasks: ['A little less to remember', 'Keep the next small thing in view.']
+  };
+  const heading = $('.title-related-links');
+  if (heading && hints[view] && !embedded) {
+    const [eyebrow, hint] = hints[view];
+    heading.before(make('p', 'prism-eyebrow', eyebrow));
+    heading.after(make('p', 'prism-page-hint', hint));
+  }
+
+  if (view === 'login' && !embedded) {
+    const form = $('#login-form');
+    if (form) {
+      form.parentElement.classList.add('prism-login-card');
+      const title = $('h2', form.parentElement);
+      if (title) {
+        title.textContent = 'Hello, lovely.';
+        title.before(make('p', 'prism-eyebrow', 'Your kitchen, in colour'));
+        title.after(make('p', 'prism-page-hint', 'Sign in for a little kitchen magic.'));
+      }
+      const username = $('#username');
+      const password = $('#password');
+      if (username) username.setAttribute('autocomplete', 'username');
+      if (password) password.setAttribute('autocomplete', 'current-password');
+      const button = $('#login-button');
+      if (button) button.textContent = 'Sign in';
+    }
+  }
+
+  const stockTable = $('#stock-overview-table');
+  if (view === 'stockoverview' && stockTable && !embedded) {
+    const main = $('.content-wrapper > .container-fluid');
+    if (main) {
+      const welcome = make('section', 'prism-welcome');
+      welcome.setAttribute('aria-labelledby', 'prism-welcome-title');
+      const copy = make('div', 'prism-welcome-copy');
+      copy.append(make('p', 'prism-kicker', 'A LITTLE LESS WASTE. A LOT MORE JOY.'));
+      const title = make('h1', 'prism-welcome-title');
+      title.id = 'prism-welcome-title';
+      title.append(document.createTextNode('Good food.'), document.createElement('br'), document.createTextNode('Great little rituals.'));
+      const description = make('p', 'prism-welcome-description');
+      const actions = make('div', 'prism-welcome-actions');
+      const productsLink = routeLink('/products');
+      const purchaseLink = routeLink('/purchase');
+      if (productsLink) {
+        const addProduct = make('a', 'btn btn-primary prism-action-primary', 'Add a product');
+        addProduct.href = route('/product/new');
+        actions.append(addProduct);
+      }
+      if (purchaseLink) {
+        const purchase = make('a', 'btn btn-outline-dark prism-action-secondary', 'Add stock');
+        purchase.href = purchaseLink.href;
+        actions.append(purchase);
+      }
+      copy.append(title, description, actions);
+      const art = make('div', 'prism-welcome-art');
+      art.setAttribute('aria-hidden', 'true');
+      art.append(make('span', 'prism-mini-orbit'), make('span', 'prism-sparkle prism-sparkle-one', '✦'), make('span', 'prism-sparkle prism-sparkle-two', '✳'));
+      welcome.append(copy, art);
+      main.prepend(welcome);
+      const updateWelcome = () => {
+        // DataTables owns this table. Its full row count avoids mistaking a
+        // filtered result or a later page of results for an empty inventory.
+        const table = window.stockOverviewTable;
+        if (!table || typeof table.rows !== 'function') {
+          description.textContent = 'Your ingredients, shopping and meal plans — all in one happy place.';
+          return;
+        }
+        const empty = table.rows({ search: 'none' }).count() === 0;
+        welcome.classList.toggle('prism-pantry-empty', empty);
+        description.textContent = empty
+          ? 'Your pantry is ready for its first ingredients. Create a product, then add the stock you have.'
+          : 'See what is in your pantry, use what is due soon, and make room for something delicious.';
+      };
+      updateWelcome();
+      if (window.jQuery) window.jQuery(stockTable).on('draw.dt.prism', updateWelcome);
+    }
+  }
+
+  if (view === 'stockoverview') {
+    const status = $('#status-filter');
+    const statusButtons = $$('.status-filter-message[data-status-filter]');
+    const syncStatusButtons = () => {
+      statusButtons.forEach(button => button.setAttribute('aria-pressed', String(!!status && status.value === button.dataset.statusFilter)));
+    };
+    statusButtons.forEach(button => {
+      button.setAttribute('role', 'button');
+      button.tabIndex = 0;
+      button.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        if (!event.repeat) button.click();
+      });
+      // Grocy's original click handler runs first and selects the filter.
+      button.addEventListener('click', syncStatusButtons);
+    });
+    if (status) {
+      // jQuery's synthetic change is also used by Grocy's status shortcuts.
+      if (window.jQuery) window.jQuery(status).on('change.prism', syncStatusButtons);
+      else status.addEventListener('change', syncStatusButtons);
+    }
+    const clearFilters = $('#clear-filter-button');
+    if (clearFilters) {
+      clearFilters.setAttribute('aria-label', clearFilters.getAttribute('data-original-title') || clearFilters.getAttribute('title') || 'Clear all filters');
+      clearFilters.addEventListener('click', syncStatusButtons);
+    }
+    [['location-filter', 'Location'], ['product-group-filter', 'Product group'], ['status-filter', 'Status']].forEach(([id, fallback]) => {
+      const select = $('#' + id);
+      if (!select) return;
+      const group = select.closest('.input-group');
+      const label = group && $('.input-group-text', group);
+      select.setAttribute('aria-label', (label && label.textContent.trim()) || fallback);
+    });
+    syncStatusButtons();
+  }
+
+  // Keep the original filtering handlers, including their debounce and state.
+  const search = $('#search');
+  if (search && !embedded) {
+    const label = view === 'stockoverview' ? 'Search your pantry' : view === 'recipes' ? 'Search your recipes' : view === 'shoppinglist' ? 'Search your shopping list' : 'Search this page';
+    if (!search.getAttribute('aria-label')) search.setAttribute('aria-label', label);
+    search.placeholder = label + '…';
+    search.setAttribute('aria-keyshortcuts', '/');
+    const group = search.closest('.input-group');
+    if (group) {
+      group.classList.add('prism-search-group');
+      const clear = make('button', 'prism-search-clear', '×');
+      clear.type = 'button';
+      clear.setAttribute('aria-label', 'Clear search');
+      clear.title = 'Clear search';
+      const syncClear = () => { clear.hidden = search.value.length === 0; };
+      clear.addEventListener('click', () => {
+        search.value = '';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+        search.dispatchEvent(new Event('keyup', { bubbles: true }));
+        search.focus();
+        syncClear();
+      });
+      search.addEventListener('input', syncClear);
+      search.addEventListener('change', syncClear);
+      const clearFilters = $('#clear-filter-button');
+      if (clearFilters) clearFilters.addEventListener('click', syncClear);
+      group.append(clear);
+      syncClear();
+    }
+  }
+
+  if (!authenticated || embedded || !nav || typeof HTMLDialogElement === 'undefined') return;
+
+  const commands = [];
+  const seen = new Set();
+  navLinks.forEach(link => {
+    const label = link.textContent.trim().replace(/\s+/g, ' ');
+    if (!label || link.classList.contains('navbar-brand') || seen.has(link.href)) return;
+    seen.add(link.href);
+    commands.push({ label, href: link.href });
+  });
+  if (routeLink('/products')) commands.unshift({ label: 'Add a new product', href: route('/product/new') });
+  if (!commands.length) return;
+
+  const dialog = make('dialog', 'prism-command-dialog');
+  dialog.id = 'prism-command-dialog';
+  dialog.setAttribute('aria-labelledby', 'prism-command-title');
+  const header = make('div', 'prism-command-header');
+  const title = make('h2', '', 'Where shall we go?');
+  title.id = 'prism-command-title';
+  const close = make('button', 'prism-command-close', '×');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Close quick navigation');
+  close.addEventListener('click', () => dialog.close());
+  header.append(title, close);
+  const commandSearch = make('input', 'prism-command-input');
+  commandSearch.type = 'search';
+  commandSearch.placeholder = 'Find a page or action…';
+  commandSearch.setAttribute('aria-label', 'Find a page or action');
+  commandSearch.setAttribute('autocomplete', 'off');
+  const list = make('nav', 'prism-command-list');
+  list.setAttribute('aria-label', 'Quick navigation results');
+  const results = commands.map(command => {
+    const link = make('a', 'prism-command-link', command.label);
+    link.href = command.href;
+    if (link.href.split('?')[0] === location.href.split('?')[0]) link.setAttribute('aria-current', 'page');
+    list.append(link);
+    return link;
+  });
+  const empty = make('p', 'prism-command-empty', 'No matching pages. Try “stock”, “recipes” or “shopping”.');
+  empty.hidden = true;
+  const count = make('span', 'sr-only');
+  count.setAttribute('role', 'status');
+  const hint = make('p', 'prism-command-hint', '↑ ↓ to browse · Enter to open · Esc to close');
+  dialog.append(header, commandSearch, list, empty, count, hint);
+  body.append(dialog);
+  const filter = () => {
+    const query = commandSearch.value.trim().toLocaleLowerCase();
+    results.forEach(link => { link.hidden = !link.textContent.toLocaleLowerCase().includes(query); });
+    const total = results.filter(link => !link.hidden).length;
+    empty.hidden = total > 0;
+    count.textContent = total + (total === 1 ? ' page found' : ' pages found');
+  };
+  commandSearch.addEventListener('input', filter);
+  dialog.addEventListener('keydown', event => {
+    // Stop Grocy's Escape handler closing any underlying edit dialog as well.
+    if (event.key === 'Escape') event.stopPropagation();
+    const visible = results.filter(link => !link.hidden);
+    if (!visible.length) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const current = visible.indexOf(document.activeElement);
+      const next = event.key === 'ArrowDown' ? (current + 1) % visible.length : (current <= 0 ? visible.length - 1 : current - 1);
+      visible[next].focus();
+    } else if (event.key === 'Enter' && event.target === commandSearch) {
+      event.preventDefault();
+      visible[0].click();
+    }
+  });
+  dialog.addEventListener('click', event => {
+    if (event.target !== dialog) return;
+    const box = dialog.getBoundingClientRect();
+    if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close();
+  });
+  const trigger = make('button', 'prism-command-trigger');
+  trigger.type = 'button';
+  trigger.append(make('span', '', 'Jump to'), make('kbd', 'prism-command-shortcut', /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'));
+  trigger.setAttribute('aria-label', 'Open quick navigation');
+  trigger.setAttribute('aria-haspopup', 'dialog');
+  trigger.setAttribute('aria-controls', dialog.id);
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.setAttribute('aria-keyshortcuts', 'Control+k Meta+k');
+  let previousFocus = null;
+  const open = () => {
+    if (dialog.open || $('.modal.show')) return;
+    previousFocus = document.activeElement;
+    commandSearch.value = '';
+    filter();
+    dialog.showModal();
+    trigger.setAttribute('aria-expanded', 'true');
+    commandSearch.focus();
+  };
+  trigger.addEventListener('click', open);
+  const sidebar = $('#sidebarResponsive');
+  if (sidebar) sidebar.before(trigger);
+  else nav.append(trigger);
+  dialog.addEventListener('close', () => {
+    trigger.setAttribute('aria-expanded', 'false');
+    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing || editable(event.target)) return;
+    if (event.key.toLowerCase() === 'k' && (event.ctrlKey || event.metaKey) && !event.altKey) {
+      event.preventDefault();
+      if (dialog.open) dialog.close();
+      else open();
+    } else if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && search && !dialog.open && !$('.modal.show')) {
+      event.preventDefault();
+      const filters = search.closest('.collapse');
+      const focusSearch = () => { search.focus(); search.select(); };
+      if (filters && getComputedStyle(filters).display === 'none' && window.jQuery) {
+        window.jQuery(filters).one('shown.bs.collapse.prism', focusSearch).collapse('show');
+      } else {
+        focusSearch();
+      }
+    }
+  });
+})();
+</script>

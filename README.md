@@ -153,6 +153,7 @@ If you don't use certain feature sets of Grocy (for example if you don't need "C
 
 - When the file `data/custom_js.html` exists, the contents of the file will be added just before `</body>` (end of body) on every page
 - When the file `data/custom_css.html` exists, the contents of the file will be added just before `</head>` (end of head) on every page
+- This fork includes [Prism Kitchen](themes/prism-kitchen/README.md), a rainbow-glass theme using these hooks, with local fonts, build instructions and verification evidence.
 
 ### Demo mode
 
